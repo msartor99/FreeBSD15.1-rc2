@@ -113,7 +113,8 @@ log "Updating pkg repository..."
 pkg update -f
 
 log "Installing system and GUI packages..."
-PACKAGES="$NVIDIA_PKGS nvidia-vaapi-driver libva-utils vdpauinfo egl-wayland egl-wayland2 xorg sddm plasma6-plasma wayland konsole dolphin firefox vlc thunderbird libreoffice fr-libreoffice sudo setxkbmap"
+# FIX: The correct FreeBSD port name is libva-nvidia-driver, not nvidia-vaapi-driver.
+PACKAGES="$NVIDIA_PKGS libva-nvidia-driver libva-utils vdpauinfo egl-wayland egl-wayland2 xorg sddm plasma6-plasma wayland konsole dolphin firefox vlc thunderbird libreoffice fr-libreoffice sudo setxkbmap"
 pkg install -y $PACKAGES
 
 log "Configuring startup services (/etc/rc.conf)..."
