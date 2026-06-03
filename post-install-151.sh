@@ -6,7 +6,7 @@ set -e
 # ==========================================
 # USER CONFIGURATION VARIABLES
 # ==========================================
-# Keyboard layout for X11/Wayland (e.g., 'us', 'fr', 'ch')
+# Keyboard layout for XLibre (e.g., 'us', 'fr', 'ch')
 KBD_LAYOUT="ch"
 # Keyboard variant (e.g., '', 'fr', 'mac')
 KBD_VARIANT="fr"
@@ -24,10 +24,10 @@ fi
 
 # 2. Disclaimer & Acceptance
 bsddialog --clear \
-    --backtitle "FreeBSD 15.1 Post-Installation" \
+    --backtitle "FreeBSD 15.1 Post-Installation (XLibre Edition)" \
     --title "DISCLAIMER" \
-    --yesno "This script will automatically configure FreeBSD 15.1 with NVIDIA drivers, KDE Plasma 6, Wayland, and essential software.\n\nIt is provided 'AS IS', without warranty of any kind. You are solely responsible for any data loss or system breakage.\n\nDo you accept these terms and wish to proceed?" \
-    12 65
+    --yesno "This script will configure FreeBSD 15.1 using the new XLibre display server, XLibre-specific NVIDIA drivers, and KDE Plasma 6.\n\nDo you accept these terms and wish to proceed?" \
+    10 65
 if [ $? -ne 0 ]; then
     clear
     log "Installation aborted by the user."
@@ -38,8 +38,8 @@ fi
 TARGET_USER=$(bsddialog --clear \
     --backtitle "FreeBSD 15.1 Post-Installation" \
     --title "User Configuration" \
-    --inputbox "Enter the name of your primary user to add to the 'wheel', 'operator', and 'video' groups:\n(This is required for sudo, power management, and 3D acceleration)" \
-    12 65 "administrateur" \
+    --inputbox "Enter the name of your primary user to add to the 'wheel', 'operator', and 'video' groups:" \
+    10 65 "administrateur" \
     3>&1 1>&2 2>&3)
 if [ $? -ne 0 ]; then
     clear
@@ -50,16 +50,16 @@ fi
 # 4. NTP Time Server Selection
 NTP_CHOICE=$(bsddialog --clear \
     --backtitle "FreeBSD 15.1 Post-Installation" \
-    --title "NTP Time Server Configuration" \
-    --menu "Select the most appropriate time server pool for your location:\n(Select with arrows, press Enter to confirm)" \
-    17 65 7 \
+    --title "NTP Configuration" \
+    --menu "Select your time server pool:" \
+    15 65 7 \
     1 "Switzerland (ch.pool.ntp.org)" \
     2 "Europe (europe.pool.ntp.org)" \
-    3 "North America (north-america.pool.ntp.org)" \
-    4 "South America (south-america.pool.ntp.org)" \
-    5 "Asia (asia.pool.ntp.org)" \
-    6 "Africa (africa.pool.ntp.org)" \
-    7 "Oceania (oceania.pool.ntp.org)" \
+    3 "North America" \
+    4 "South America" \
+    5 "Asia" \
+    6 "Africa" \
+    7 "Oceania" \
     3>&1 1>&2 2>&3)
 if [ $? -ne 0 ]; then
     clear
@@ -71,85 +71,63 @@ case "$NTP_CHOICE" in
     1) NTP_SERVER="ch.pool.ntp.org" ;;
     2) NTP_SERVER="europe.pool.ntp.org" ;;
     3) NTP_SERVER="north-america.pool.ntp.org" ;;
-    4) NTP_SERVER="south-america.pool.ntp.org" ;;
-    5) NTP_SERVER="asia.pool.ntp.org" ;;
-    6) NTP_SERVER="africa.pool.ntp.org" ;;
-    7) NTP_SERVER="oceania.pool.ntp.org" ;;
-    *) log "Invalid choice."; exit 1 ;;
+    *) NTP_SERVER="pool.ntp.org" ;;
 esac
 
-# 5. GPU Selection
+# 5. GPU Selection (XLIBRE SPECIFIC)
 GPU_CHOICE=$(bsddialog --clear \
     --backtitle "FreeBSD 15.1 Post-Installation" \
-    --title "Graphics Card Configuration" \
-    --menu "Choose the NVIDIA graphics card architecture installed on this system:\n(Select with arrows, press Enter to confirm)" \
-    15 65 2 \
-    1 "Modern GPU (e.g., RTX 2060, 3000, 4000) - Latest Drivers" \
-    2 "Legacy Pascal GPU (e.g., Quadro P1000) - 580 Branch" \
+    --title "GPU Configuration" \
+    --menu "Choose your NVIDIA architecture:" \
+    12 65 2 \
+    1 "Modern GPU (RTX 2060) - Latest Drivers" \
+    2 "Legacy Pascal GPU (Quadro P1000) - 580 Branch" \
     3>&1 1>&2 2>&3)
 if [ $? -ne 0 ]; then
     clear
-    log "Installation aborted by the user."
+    log "Installation aborted."
     exit 1
 fi
 clear
 
+# CRITICAL UPDATE: Using xlibre-nvidia-driver for userland, and nvidia-drm-kmod for the kernel
 case "$GPU_CHOICE" in
-    1)
-        log "Selected: Modern GPU. Using the latest NVIDIA branch."
-        NVIDIA_PKGS="nvidia-driver nvidia-drm-kmod"
-        ;;
-    2)
-        log "Selected: Legacy Pascal GPU. Using the 580 Legacy branch."
-        NVIDIA_PKGS="nvidia-driver-580 nvidia-drm-kmod-580"
-        ;;
-    *)
-        log "Invalid choice."
-        exit 1
-        ;;
+    1) NVIDIA_PKGS="xlibre-nvidia-driver nvidia-drm-kmod" ;;
+    2) NVIDIA_PKGS="xlibre-nvidia-driver-580 nvidia-drm-kmod-580" ;;
 esac
 
 log "Updating pkg repository..."
 pkg update -f
 
-log "Installing system and GUI packages..."
-# FIX: The correct FreeBSD port name is libva-nvidia-driver, not nvidia-vaapi-driver.
-PACKAGES="$NVIDIA_PKGS libva-nvidia-driver libva-utils vdpauinfo egl-wayland egl-wayland2 xorg sddm plasma6-plasma wayland konsole dolphin firefox vlc thunderbird libreoffice fr-libreoffice sudo setxkbmap"
+log "Installing XLibre system and GUI packages..."
+# Swapped xorg for xlibre metaport
+PACKAGES="$NVIDIA_PKGS xlibre sddm plasma6-plasma konsole dolphin firefox vlc thunderbird libreoffice fr-libreoffice sudo"
 pkg install -y $PACKAGES
 
 log "Configuring startup services (/etc/rc.conf)..."
 sysrc dbus_enable="YES"
 sysrc sddm_enable="YES"
-
-log "Configuring NTP (Time synchronization) via $NTP_SERVER..."
 sysrc ntpd_enable="YES"
 sysrc ntpd_sync_on_start="YES"
 
+log "Writing NTP configuration..."
 if [ ! -f /etc/ntp.conf.bak ]; then
     cp /etc/ntp.conf /etc/ntp.conf.bak
 fi
-
 cat << EOF > /etc/ntp.conf
-# NTP configuration generated by post-install script
 server $NTP_SERVER iburst
 restrict default kod nomodify notrap nopeer noquery
 restrict -6 default kod nomodify notrap nopeer noquery
 restrict 127.0.0.1
 restrict -6 ::1
-restrict 127.127.1.0
 EOF
 
-log "Configuring kernel modules (NVIDIA, AMD Thermal, and Audio)..."
+log "Configuring kernel modules (NVIDIA & Audio)..."
 CURRENT_KLD=$(sysrc -n kld_list 2>/dev/null || echo "")
 
 case "$CURRENT_KLD" in
     *nvidia-modeset*) ;;
     *) sysrc kld_list+=" nvidia-modeset" ;;
-esac
-
-case "$CURRENT_KLD" in
-    *nvidia-drm*) ;;
-    *) sysrc kld_list+=" nvidia-drm" ;;
 esac
 
 case "$CURRENT_KLD" in
@@ -162,106 +140,38 @@ case "$CURRENT_KLD" in
     *) sysrc kld_list+=" snd_hda" ;;
 esac
 
-log "Configuring Wayland DRM & Aquantia Network (/boot/loader.conf)..."
-if ! grep -q '^hw.nvidiadrm.modeset=' /boot/loader.conf 2>/dev/null; then
-    echo 'hw.nvidiadrm.modeset="1"' >> /boot/loader.conf
-fi
+log "Configuring Network (/boot/loader.conf)..."
 if ! grep -q '^if_aq_load=' /boot/loader.conf 2>/dev/null; then
     echo 'if_aq_load="YES"' >> /boot/loader.conf
 fi
 
-# ---------------------------------------------------------
-# KEYBOARD AUTO-DETECTION
-# ---------------------------------------------------------
-log "Detecting System Keyboard Layout from /etc/rc.conf..."
-RC_KEYMAP=$(sysrc -n keymap 2>/dev/null || echo "us")
-
-case "$RC_KEYMAP" in
-    *ch*)     XKB_LAYOUT="ch"; XKB_VARIANT="fr" ;; 
-    *fr.mac*) XKB_LAYOUT="fr"; XKB_VARIANT="mac" ;;
-    *fr*)     XKB_LAYOUT="fr"; XKB_VARIANT="" ;;   
-    *be*)     XKB_LAYOUT="be"; XKB_VARIANT="" ;;   
-    *ca*)     XKB_LAYOUT="ca"; XKB_VARIANT="fr" ;; 
-    *uk*|*gb*)XKB_LAYOUT="gb"; XKB_VARIANT="" ;;   
-    *de*)     XKB_LAYOUT="de"; XKB_VARIANT="" ;;   
-    *es*)     XKB_LAYOUT="es"; XKB_VARIANT="" ;;   
-    *it*)     XKB_LAYOUT="it"; XKB_VARIANT="" ;;   
-    *)        XKB_LAYOUT="us"; XKB_VARIANT="" ;;   
-esac
-
-log "  -> Detected Keymap: $RC_KEYMAP"
-log "  -> Applying Layout: $XKB_LAYOUT / Variant: ${XKB_VARIANT:-none}"
-
-# ---------------------------------------------------------
-# ANTI-PANIC: HARDENING X11 CONFIGURATION
-# ---------------------------------------------------------
-log "Hardening X11 configuration to prevent NVIDIA DRM panics..."
+log "Configuring XLibre (Keyboard & Drivers)..."
 mkdir -p /usr/local/etc/X11/xorg.conf.d
 
 cat << EOF > /usr/local/etc/X11/xorg.conf.d/00-keyboard.conf
 Section "InputClass"
     Identifier "system-keyboard"
     MatchIsKeyboard "on"
-    Option "XkbLayout" "$XKB_LAYOUT"
-    Option "XkbVariant" "$XKB_VARIANT"
+    Option "XkbLayout" "$KBD_LAYOUT"
+    Option "XkbVariant" "$KBD_VARIANT"
 EndSection
 EOF
 
-# Disable AutoAddGPU to stop Xorg from touching the DRM nodes aggressively
 cat << EOF > /usr/local/etc/X11/xorg.conf.d/20-nvidia.conf
-Section "ServerFlags"
-    Option "AutoAddGPU" "off"
-EndSection
-
-Section "OutputClass"
-    Identifier "NVIDIA-DRM"
-    MatchDriver "nvidia-drm"
-    Driver "nvidia"
-    Option "PrimaryGPU" "yes"
-EndSection
-
 Section "Device"
     Identifier "NVIDIA Card"
     Driver "nvidia"
 EndSection
 EOF
 
-# ---------------------------------------------------------
-# SDDM WAYLAND GREETER & THEME
-# ---------------------------------------------------------
-log "Configuring SDDM (Native Wayland Greeter & Maldives Theme)..."
+log "Configuring SDDM (Theme)..."
 mkdir -p /usr/local/etc/sddm.conf.d
-
 cat << EOF > /usr/local/etc/sddm.conf.d/10-theme.conf
 [Theme]
 Current=maldives
 EOF
 
-# Force SDDM to use Wayland (bypasses Xorg completely on boot)
-# and injects the correct Keyboard layout variables into kwin_wayland
-cat << EOF > /usr/local/etc/sddm.conf.d/20-wayland.conf
-[General]
-DisplayServer=wayland
-
-[Wayland]
-CompositorCommand=env XKB_DEFAULT_LAYOUT="$XKB_LAYOUT" XKB_DEFAULT_VARIANT="$XKB_VARIANT" kwin_wayland --drm --no-lockscreen --no-global-shortcuts --locale1
-EOF
-
-# ---------------------------------------------------------
-# HARDWARE VIDEO ACCELERATION (WAYLAND/FIREFOX)
-# ---------------------------------------------------------
-log "Configuring Hardware Video Acceleration Profiles..."
-mkdir -p /usr/local/etc/profile.d
-cat << 'EOF' > /usr/local/etc/profile.d/nvidia-hwaccel.sh
-# Force Firefox and Wayland apps to use NVIDIA VA-API
-export NVD_BACKEND=direct
-export MOZ_DISABLE_RDD_SANDBOX=1
-export LIBVA_DRIVER_NAME=nvidia
-export VDPAU_DRIVER=nvidia
-EOF
-chmod +x /usr/local/etc/profile.d/nvidia-hwaccel.sh
-
-log "Mounting procfs and linprocfs (Required by Wayland/KDE/LinuxKPI)..."
+log "Mounting linprocfs (Required by LinuxKPI)..."
 mkdir -p /compat/linux/proc
 if ! grep -q "[[:space:]]/proc[[:space:]]" /etc/fstab; then
     echo "proc        /proc           procfs  rw  0   0" >> /etc/fstab
@@ -271,23 +181,28 @@ if ! grep -q "[[:space:]]/compat/linux/proc[[:space:]]" /etc/fstab; then
 fi
 mount -a || true
 
-log "Securing and configuring user '$TARGET_USER'..."
+log "Securing users..."
+# Give SDDM access to the video card
+if id "sddm" >/dev/null 2>&1; then
+    pw groupmod video -m sddm
+    log "  -> System user 'sddm' added to 'video' group."
+fi
+
+# Configure primary user
 if id "$TARGET_USER" >/dev/null 2>&1; then
     pw groupmod wheel -m "$TARGET_USER"
     pw groupmod operator -m "$TARGET_USER"
     pw groupmod video -m "$TARGET_USER"
-    log "  -> User '$TARGET_USER' successfully added to wheel, operator, and video groups."
+    log "  -> User '$TARGET_USER' added to wheel, operator, and video groups."
     
     if ! grep -q "^%wheel ALL=(ALL:ALL) ALL" /usr/local/etc/sudoers 2>/dev/null; then
         echo "%wheel ALL=(ALL:ALL) ALL" >> /usr/local/etc/sudoers
     fi
 else
-    log "  ! Warning: User '$TARGET_USER' does not exist on this system. Please create it manually."
+    log "  ! Warning: User '$TARGET_USER' does not exist."
 fi
 
 echo "-----------------------------------------------------------------"
-log "Post-installation script completed successfully!"
-echo "You can now safely reboot your machine."
-echo "If you have no sound via HDMI, run: cat /dev/sndstat"
-echo "Then set your default audio device in /etc/sysctl.conf"
+log "Installation completed with XLibre ecosystem!"
+echo "Please reboot your machine."
 echo "-----------------------------------------------------------------"
