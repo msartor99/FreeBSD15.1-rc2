@@ -90,7 +90,6 @@ if [ $? -ne 0 ]; then
 fi
 clear
 
-# CRITICAL UPDATE: Using xlibre-nvidia-driver for userland, and nvidia-drm-kmod for the kernel
 case "$GPU_CHOICE" in
     1) NVIDIA_PKGS="xlibre-nvidia-driver nvidia-drm-kmod" ;;
     2) NVIDIA_PKGS="xlibre-nvidia-driver-580 nvidia-drm-kmod-580" ;;
@@ -99,8 +98,27 @@ esac
 log "Updating pkg repository..."
 pkg update -f
 
+# ---------------------------------------------------------
+# IDEMPOTENCY: CLEANUP LEGACY CONFLICTING PACKAGES
+# ---------------------------------------------------------
+log "Checking for conflicting legacy Xorg/NVIDIA packages..."
+CONFLICTING_PKGS="xorg xorg-server xorg-minimal nvidia-driver nvidia-driver-580"
+
+for pkg in $CONFLICTING_PKGS; do
+    if pkg info -e "$pkg" >/dev/null 2>&1; then
+        log "  -> Removing conflicting package: $pkg"
+        pkg delete -y "$pkg"
+    fi
+done
+
+# Clean up any orphaned dependencies left by the old Xorg stack
+log "Cleaning up orphaned dependencies..."
+pkg autoremove -y
+
+# ---------------------------------------------------------
+# INSTALLATION
+# ---------------------------------------------------------
 log "Installing XLibre system and GUI packages..."
-# Swapped xorg for xlibre metaport
 PACKAGES="$NVIDIA_PKGS xlibre sddm plasma6-plasma konsole dolphin firefox vlc thunderbird libreoffice fr-libreoffice sudo"
 pkg install -y $PACKAGES
 
@@ -182,13 +200,11 @@ fi
 mount -a || true
 
 log "Securing users..."
-# Give SDDM access to the video card
 if id "sddm" >/dev/null 2>&1; then
     pw groupmod video -m sddm
     log "  -> System user 'sddm' added to 'video' group."
 fi
 
-# Configure primary user
 if id "$TARGET_USER" >/dev/null 2>&1; then
     pw groupmod wheel -m "$TARGET_USER"
     pw groupmod operator -m "$TARGET_USER"
