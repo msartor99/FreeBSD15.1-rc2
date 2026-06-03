@@ -1,74 +1,103 @@
-
 #!/bin/sh
 
-# Arrête le script en cas d'erreur
+# Stop the script on any critical error
 set -e
+
+# ==========================================
+# USER CONFIGURATION VARIABLES
+# Change these values before running if needed
+# ==========================================
+# Keyboard layout for X11/Wayland (e.g., 'us', 'fr', 'ch')
+KBD_LAYOUT="ch"
+# Keyboard variant (e.g., '', 'fr', 'mac')
+KBD_VARIANT="fr"
+# ==========================================
 
 log() {
     printf "\033[0;32m==>\033[0m %s\n" "$1"
 }
 
+# 1. Check Root Privileges
 if [ "$(id -u)" -ne 0 ]; then
-    printf "Erreur : Ce script doit être exécuté en tant que root.\n" >&2
+    printf "Error: This script must be run as root.\n" >&2
     exit 1
 fi
 
-log "Mise à jour du catalogue de paquets (pkg)..."
-pkg update -f
-
-# ---------------------------------------------------------
-# MENU DIALOG POUR LA CARTE GRAPHIQUE
-# ---------------------------------------------------------
-# On utilise la redirection des descripteurs de fichiers (3>&1 1>&2 2>&3)
-# pour capturer le choix de 'dialog' dans la variable GPU_CHOICE
-GPU_CHOICE=$(dialog --clear \
-    --backtitle "Post-Installation FreeBSD 15.1 - Lenovo P620" \
-    --title "Configuration de la Carte Graphique" \
-    --menu "Choisissez la carte NVIDIA installée sur ce système :\n(Sélectionnez avec les flèches, validez avec Entrée)" \
-    15 65 2 \
-    1 "RTX 2060 (Recommandé - Pilote Récent)" \
-    2 "Quadro P1000 (Pilote Legacy 580)" \
-    3>&1 1>&2 2>&3)
-
-# Vérifie si l'utilisateur a appuyé sur Annuler (Echap ou Cancel)
+# 2. Disclaimer & Acceptance (Dialog Menu)
+dialog --clear \
+    --backtitle "FreeBSD 15.1 Post-Installation" \
+    --title "DISCLAIMER" \
+    --yesno "This script will automatically configure FreeBSD 15.1 with NVIDIA drivers, KDE Plasma 6, Wayland, and essential software.\n\nIt is provided 'AS IS', without warranty of any kind. You are solely responsible for any data loss or system breakage.\n\nDo you accept these terms and wish to proceed?" \
+    12 65
 if [ $? -ne 0 ]; then
     clear
-    log "Installation annulée par l'utilisateur."
+    log "Installation aborted by the user."
+    exit 1
+fi
+
+# 3. Target User Selection (Dialog Input)
+TARGET_USER=$(dialog --clear \
+    --backtitle "FreeBSD 15.1 Post-Installation" \
+    --title "User Configuration" \
+    --inputbox "Enter the name of your primary user to add to the 'wheel', 'operator', and 'video' groups:\n(This is required for sudo, power management, and 3D acceleration)" \
+    12 65 "administrateur" \
+    3>&1 1>&2 2>&3)
+if [ $? -ne 0 ]; then
+    clear
+    log "Installation aborted by the user."
+    exit 1
+fi
+
+# 4. GPU Selection (Dialog Menu)
+GPU_CHOICE=$(dialog --clear \
+    --backtitle "FreeBSD 15.1 Post-Installation" \
+    --title "Graphics Card Configuration" \
+    --menu "Choose the NVIDIA graphics card architecture installed on this system:\n(Select with arrows, press Enter to confirm)" \
+    15 65 2 \
+    1 "Modern GPU (e.g., RTX 2060, 3000, 4000) - Latest Drivers" \
+    2 "Legacy Pascal GPU (e.g., Quadro P1000) - 580 Branch" \
+    3>&1 1>&2 2>&3)
+if [ $? -ne 0 ]; then
+    clear
+    log "Installation aborted by the user."
     exit 1
 fi
 clear
 
-# Attribution des paquets NVIDIA en fonction du choix
+# Assign NVIDIA packages based on user choice
 case "$GPU_CHOICE" in
     1)
-        log "Sélection : RTX 2060. Utilisation des pilotes récents."
+        log "Selected: Modern GPU. Using the latest NVIDIA branch."
         NVIDIA_PKGS="nvidia-driver nvidia-drm-kmod"
         ;;
     2)
-        log "Sélection : Quadro P1000. Utilisation de la branche Legacy 580."
+        log "Selected: Legacy Pascal GPU. Using the 580 Legacy branch."
         NVIDIA_PKGS="nvidia-driver-580 nvidia-drm-kmod-580"
         ;;
     *)
-        log "Choix invalide."
+        log "Invalid choice."
         exit 1
         ;;
 esac
 
-log "Installation des paquets système et graphiques..."
-# Base commune + paquets NVIDIA spécifiques
+log "Updating pkg repository..."
+pkg update -f
+
+log "Installing system and GUI packages..."
+# Base software + Wayland EGL + KDE Plasma 6 + Apps
 PACKAGES="$NVIDIA_PKGS egl-wayland egl-wayland2 xorg sddm plasma6-plasma plasma6-wayland wayland konsole dolphin firefox vlc thunderbird libreoffice fr-libreoffice sudo"
 
-# -y rend la commande idempotente
+# -y makes the installation idempotent
 pkg install -y $PACKAGES
 
-log "Configuration des services de base au démarrage (/etc/rc.conf)..."
+log "Configuring startup services (/etc/rc.conf)..."
 sysrc dbus_enable="YES"
 sysrc sddm_enable="YES"
 
-log "Configuration des modules noyau (NVIDIA & AMD)..."
+log "Configuring kernel modules (NVIDIA & AMD Thermal)..."
 CURRENT_KLD=$(sysrc -n kld_list 2>/dev/null || echo "")
 
-# Les noms des modules compilés restent les mêmes peu importe la version du paquet
+# Order matters: modeset first, then drm
 case "$CURRENT_KLD" in
     *nvidia-modeset*) ;;
     *) sysrc kld_list+=" nvidia-modeset" ;;
@@ -79,35 +108,35 @@ case "$CURRENT_KLD" in
     *) sysrc kld_list+=" nvidia-drm" ;;
 esac
 
-# Senseur thermique pour votre CPU AMD Threadripper
+# AMD CPU thermal sensor
 case "$CURRENT_KLD" in
     *amdtemp*) ;;
     *) sysrc kld_list+=" amdtemp" ;;
 esac
 
-log "Configuration de loader.conf pour Wayland et la carte Aquantia..."
-# Active le modeset DRM (obligatoire pour Wayland avec NVIDIA)
+log "Configuring Wayland DRM & Aquantia Network (/boot/loader.conf)..."
+# Enable DRM modeset (Mandatory for Wayland with NVIDIA)
 if ! grep -q '^hw.nvidiadrm.modeset=' /boot/loader.conf 2>/dev/null; then
     echo 'hw.nvidiadrm.modeset="1"' >> /boot/loader.conf
 fi
 
-# Préparation du pilote aq(4) pour la carte réseau Aquantia AQ107
+# Prepare driver for Aquantia AQ107 network card
 if ! grep -q '^if_aq_load=' /boot/loader.conf 2>/dev/null; then
     echo 'if_aq_load="YES"' >> /boot/loader.conf
 fi
 
-log "Configuration du clavier X11/SDDM (Suisse Romand)..."
+log "Configuring X11/SDDM Keyboard Layout ($KBD_LAYOUT-$KBD_VARIANT)..."
 mkdir -p /usr/local/etc/X11/xorg.conf.d
-cat << 'EOF' > /usr/local/etc/X11/xorg.conf.d/00-keyboard.conf
+cat << EOF > /usr/local/etc/X11/xorg.conf.d/00-keyboard.conf
 Section "InputClass"
     Identifier "system-keyboard"
     MatchIsKeyboard "on"
-    Option "XkbLayout" "ch"
-    Option "XkbVariant" "fr"
+    Option "XkbLayout" "$KBD_LAYOUT"
+    Option "XkbVariant" "$KBD_VARIANT"
 EndSection
 EOF
 
-log "Montage de procfs et linprocfs (Requis par Wayland/KDE/LinuxKPI)..."
+log "Mounting procfs and linprocfs (Required by Wayland/KDE/LinuxKPI)..."
 if ! grep -q "[[:space:]]/proc[[:space:]]" /etc/fstab; then
     echo "proc        /proc           procfs  rw  0   0" >> /etc/fstab
 fi
@@ -116,24 +145,23 @@ if ! grep -q "[[:space:]]/compat/linux/proc[[:space:]]" /etc/fstab; then
 fi
 mount -a || true
 
-log "Sécurisation de l'utilisateur 'administrateur'..."
-# Si l'utilisateur n'existe pas, on le prévient sans bloquer le script
-if id "administrateur" >/dev/null 2>&1; then
-    # Assignation idempotente aux groupes requis
-    pw groupmod wheel -m administrateur
-    pw groupmod operator -m administrateur
-    pw groupmod video -m administrateur
-    log "  -> Utilisateur 'administrateur' bien assigné aux groupes wheel, operator et video."
+log "Securing and configuring user '$TARGET_USER'..."
+if id "$TARGET_USER" >/dev/null 2>&1; then
+    # Idempotent assignment to required groups
+    pw groupmod wheel -m "$TARGET_USER"
+    pw groupmod operator -m "$TARGET_USER"
+    pw groupmod video -m "$TARGET_USER"
+    log "  -> User '$TARGET_USER' successfully added to wheel, operator, and video groups."
     
-    # S'assure que wheel peut utiliser sudo
+    # Ensure the wheel group can use sudo
     if ! grep -q "^%wheel ALL=(ALL:ALL) ALL" /usr/local/etc/sudoers 2>/dev/null; then
         echo "%wheel ALL=(ALL:ALL) ALL" >> /usr/local/etc/sudoers
     fi
 else
-    log "  ! Attention : L'utilisateur 'administrateur' n'existe pas encore sur ce système."
+    log "  ! Warning: User '$TARGET_USER' does not exist on this system. Please create it manually."
 fi
 
 echo "-----------------------------------------------------------------"
-log "Script de post-installation terminé avec succès !"
-echo "Vous pouvez maintenant redémarrer la machine."
+log "Post-installation script completed successfully!"
+echo "You can now safely reboot your machine."
 echo "-----------------------------------------------------------------"
